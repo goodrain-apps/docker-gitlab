@@ -1,22 +1,25 @@
 FROM goodrainapps/ubuntu:14.04.20170613
 MAINTAINER zhouyq@goodrain.com
 
-ENV GITLAB_VERSION=9.2.7 \
+ENV GITLAB_VERSION=10.2.2 \
     RUBY_VERSION=2.3 \
-    GOLANG_VERSION=1.6.3 \
-    GITLAB_SHELL_VERSION=5.0.4 \
-    GITLAB_WORKHORSE_VERSION=2.0.0 \
-    GITLAB_PAGES_VERSION=0.4.2 \
+    GOLANG_VERSION=1.8.3 \
+    GITLAB_SHELL_VERSION=5.9.4 \
+    GITLAB_WORKHORSE_VERSION=3.3.1 \
+    GITLAB_PAGES_VERSION=0.6.0 \
+    GITALY_SERVER_VERSION=0.52.0 \
     GITLAB_USER="git" \
     GITLAB_HOME="/home/git" \
     GITLAB_LOG_DIR="/var/log/gitlab" \
     GITLAB_CACHE_DIR="/etc/docker-gitlab" \
-    RAILS_ENV=production
+    RAILS_ENV=production \
+    NODE_ENV=production
 
 ENV GITLAB_INSTALL_DIR="${GITLAB_HOME}/gitlab" \
     GITLAB_SHELL_INSTALL_DIR="${GITLAB_HOME}/gitlab-shell" \
     GITLAB_WORKHORSE_INSTALL_DIR="${GITLAB_HOME}/gitlab-workhorse" \
     GITLAB_PAGES_INSTALL_DIR="${GITLAB_HOME}/gitlab-pages" \
+    GITLAB_GITALY_INSTALL_DIR="${GITLAB_HOME}/gitaly" \
     GITLAB_DATA_DIR="${GITLAB_HOME}/data" \
     GITLAB_BUILD_DIR="${GITLAB_CACHE_DIR}/build" \
     GITLAB_RUNTIME_DIR="${GITLAB_CACHE_DIR}/runtime"
@@ -30,7 +33,7 @@ RUN apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv E1DD270288B4E60
  && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - \
  && echo 'deb http://apt.postgresql.org/pub/repos/apt/ trusty-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
  && wget --quiet -O - https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add - \
- && echo 'deb https://deb.nodesource.com/node_7.x trusty main' > /etc/apt/sources.list.d/nodesource.list \
+ && echo 'deb https://deb.nodesource.com/node_8.x trusty main' > /etc/apt/sources.list.d/nodesource.list \
  && wget --quiet -O - https://dl.yarnpkg.com/debian/pubkey.gpg  | apt-key add - \
  && echo 'deb https://dl.yarnpkg.com/debian/ stable main' > /etc/apt/sources.list.d/yarn.list \
  && apt-get update \

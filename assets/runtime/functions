@@ -19,6 +19,7 @@ GITLAB_NGINX_CONFIG="/etc/nginx/sites-enabled/gitlab"
 GITLAB_CI_NGINX_CONFIG="/etc/nginx/sites-enabled/gitlab_ci"
 GITLAB_REGISTRY_NGINX_CONFIG="/etc/nginx/sites-enabled/gitlab-registry"
 GITLAB_PAGES_NGINX_CONFIG="/etc/nginx/sites-enabled/gitlab-pages"
+GITLAB_GITALY_CONFIG="${GITLAB_GITALY_INSTALL_DIR}/config.toml"
 
 # Compares two version strings `a` and `b`
 # Returns
@@ -150,10 +151,12 @@ gitlab_finalize_database_parameters() {
   case ${DB_ADAPTER} in
     mysql2)
       DB_ENCODING=${DB_ENCODING:-utf8}
+      DB_COLLATION=${DB_COLLATION:-utf8_general_ci}
       DB_PORT=${DB_PORT:-3306}
       ;;
     postgresql)
       DB_ENCODING=${DB_ENCODING:-unicode}
+      # DB_COLLATION: Not supported for postgresql and will be removed below.
       DB_PORT=${DB_PORT:-5432}
       ;;
     *)
@@ -205,6 +208,7 @@ gitlab_configure_database() {
   update_template ${GITLAB_DATABASE_CONFIG} \
     DB_ADAPTER \
     DB_ENCODING \
+    DB_COLLATION \
     DB_HOST \
     DB_PORT \
     DB_NAME \
@@ -267,6 +271,30 @@ gitlab_configure_redis() {
     REDIS_HOST \
     REDIS_PORT \
     REDIS_DB_NUMBER
+}
+
+gitlab_configure_gitaly() {
+  echo "Configuring gitlab::gitaly..."
+  update_template ${GITLAB_GITALY_CONFIG} \
+    GITALY_SOCKET_PATH \
+    GITLAB_REPOS_DIR
+
+  update_template ${GITLAB_CONFIG} \
+    GITALY_CLIENT_PATH \
+    GITALY_TOKEN
+
+}
+
+gitlab_configure_monitoring() {
+  echo "Configuring gitlab::monitoring..."
+
+  update_template ${GITLAB_CONFIG} \
+    GITLAB_MONITORING_UNICORN_SAMPLER_INTERVAL \
+    GITLAB_MONITORING_IP_WHITELIST \
+    GITLAB_MONITORING_SIDEKIQ_EXPORTER_ENABLED \
+    GITLAB_MONITORING_SIDEKIQ_EXPORTER_ADDRESS \
+    GITLAB_MONITORING_SIDEKIQ_EXPORTER_PORT
+
 }
 
 gitlab_configure_gitlab_workhorse() {
@@ -416,6 +444,9 @@ gitlab_configure_ldap() {
     LDAP_PORT \
     LDAP_UID \
     LDAP_METHOD \
+    LDAP_VERIFY_SSL \
+    LDAP_CA_FILE \
+    LDAP_SSL_VERSION \
     LDAP_BIND_DN \
     LDAP_PASS \
     LDAP_TIMEOUT \
@@ -695,6 +726,18 @@ gitlab_configure_secrets() {
   GITLAB_SECRETS_OTP_KEY_BASE
   # backup secrets config
   cp -f ${GITLAB_SECRETS_CONFIG} ${GITLAB_DATA_DIR}/
+
+  local shell_secret="${GITLAB_INSTALL_DIR}/.gitlab_shell_secret"
+  if [[ ! -f "${shell_secret}" ]]; then
+    exec_as_git openssl rand -hex -out "${shell_secret}" 16
+    chmod 600 "${shell_secret}"
+  fi
+
+  local workhorse_secret="${GITLAB_INSTALL_DIR}/.gitlab_workhorse_secret"
+  if [[ ! -f "${workhorse_secret}" ]]; then
+    exec_as_git openssl rand -base64 -out "${workhorse_secret}" 32
+    chmod 600 "${workhorse_secret}"
+  fi
 }
 
 gitlab_configure_sidekiq() {
@@ -720,8 +763,7 @@ gitlab_configure_sidekiq() {
 gitlab_configure_backups_schedule() {
   case ${GITLAB_BACKUP_SCHEDULE} in
     daily|weekly|monthly)
-      if [[ ! $(crontab -u ${GITLAB_USER} -l >/tmp/cron.${GITLAB_USER} 2>/dev/null) || \
-            ! $(grep -q 'bundle exec rake gitlab:backup:create' /tmp/cron.${GITLAB_USER}) ]]; then
+      if ! crontab -u ${GITLAB_USER} -l >/tmp/cron.${GITLAB_USER} 2>/dev/null || ! grep -q 'bundle exec rake gitlab:backup:create' /tmp/cron.${GITLAB_USER}; then
         echo "Configuring gitlab::backups::schedule..."
         read hour min <<< ${GITLAB_BACKUP_TIME//[:]/ }
         day_of_month=*
@@ -824,6 +866,16 @@ gitlab_configure_gravatar() {
     update_template ${GITLAB_CONFIG} GITLAB_GRAVATAR_HTTPS_URL
   else
     exec_as_git sed -i "/{{GITLAB_GRAVATAR_HTTPS_URL}}/d" ${GITLAB_CONFIG}
+  fi
+}
+
+gitlab_configure_cron_jobs() {
+  echo "Configuring gitlab::cron_jobs..."
+
+  if [[ -n "${GITLAB_PIPELINE_SCHEDULE_WORKER_CRON}" ]]; then
+    update_template ${GITLAB_CONFIG} GITLAB_PIPELINE_SCHEDULE_WORKER_CRON
+  else
+    exec_as_git sed -i "/{{GITLAB_PIPELINE_SCHEDULE_WORKER_CRON}}/d" ${GITLAB_CONFIG}
   fi
 }
 
@@ -933,7 +985,8 @@ gitlab_configure_pages(){
     GITLAB_PAGES_ENABLED \
     GITLAB_PAGES_DOMAIN \
     GITLAB_PAGES_PORT \
-    GITLAB_PAGES_HTTPS
+    GITLAB_PAGES_HTTPS \
+    GITLAB_PAGES_ARTIFACTS_SERVER
 
   if [[ -n ${GITLAB_PAGES_EXTERNAL_HTTP} ]]; then
     update_template ${GITLAB_CONFIG} \
@@ -997,6 +1050,21 @@ nginx_configure_gitlab_hsts() {
    fi
  }
 
+nginx_configure_gitlab_real_ip() {
+  if [[ ${NGINX_REAL_IP_RECURSIVE} == on && \
+     -n ${NGINX_REAL_IP_TRUSTED_ADDRESSES} ]]; then
+    echo "Configuring nginx::gitlab::real_ip..."
+    update_template ${GITLAB_NGINX_CONFIG} \
+      NGINX_REAL_IP_RECURSIVE \
+      NGINX_REAL_IP_TRUSTED_ADDRESSES
+  else
+    NGINX_REAL_IP_RECURSIVE="off"
+    update_template ${GITLAB_NGINX_CONFIG} \
+      NGINX_REAL_IP_RECURSIVE
+    sed -i "/{{NGINX_REAL_IP_TRUSTED_ADDRESSES}}/d" ${GITLAB_NGINX_CONFIG}
+  fi
+}
+
 nginx_configure_gitlab() {
   echo "Configuring nginx::gitlab..."
   update_template ${GITLAB_NGINX_CONFIG} \
@@ -1011,6 +1079,7 @@ nginx_configure_gitlab() {
   nginx_configure_gitlab_ssl
   nginx_configure_gitlab_hsts
   nginx_configure_gitlab_ipv6
+  nginx_configure_gitlab_real_ip
 }
 
 nginx_configure_gitlab_ci() {
@@ -1343,6 +1412,8 @@ install_configuration_templates() {
       echo "Assuming that the Registry is running behind a HTTPS enabled load balancer."
     fi
   fi
+
+  install_template ${GITLAB_USER}: gitaly/config.toml ${GITLAB_GITALY_CONFIG}
 }
 
 configure_gitlab() {
@@ -1352,6 +1423,10 @@ configure_gitlab() {
     GITLAB_SHELL_INSTALL_DIR \
     GITLAB_DATA_DIR \
     GITLAB_REPOS_DIR \
+    GITLAB_REPOSITORIES_STORAGES_DEFAULT_FAILURE_COUNT_THRESHOLD \
+    GITLAB_REPOSITORIES_STORAGES_DEFAULT_FAILURE_WAIT_TIME \
+    GITLAB_REPOSITORIES_STORAGES_DEFAULT_FAILURE_RESET_TIME \
+    GITLAB_REPOSITORIES_STORAGES_DEFAULT_STORAGE_TIMEOUT \
     GITLAB_DOWNLOADS_DIR \
     GITLAB_SHARED_DIR \
     GITLAB_HOST \
@@ -1371,6 +1446,8 @@ configure_gitlab() {
   gitlab_configure_redis
   gitlab_configure_secrets
   gitlab_configure_sidekiq
+  gitlab_configure_gitaly
+  gitlab_configure_monitoring
   gitlab_configure_gitlab_workhorse
   gitlab_configure_relative_url
   gitlab_configure_trusted_proxies
@@ -1387,6 +1464,7 @@ configure_gitlab() {
   gitlab_configure_oauth
   gitlab_configure_ldap
   gitlab_configure_gravatar
+  gitlab_configure_cron_jobs
   gitlab_configure_analytics
   gitlab_configure_backups
   gitlab_configure_registry
@@ -1527,7 +1605,7 @@ migrate_database() {
     # assets need to be recompiled when GITLAB_RELATIVE_URL_ROOT is used
     if [[ -n ${GITLAB_RELATIVE_URL_ROOT} ]]; then
       echo "Recompiling assets (relative_url in use), this could take a while..."
-      exec_as_git bundle exec rake assets:clean assets:precompile webpack:compile  >/dev/null 2>&1
+      exec_as_git bundle exec rake gitlab:assets:compile >/dev/null 2>&1
     fi
 
     echo "Clearing cache..."

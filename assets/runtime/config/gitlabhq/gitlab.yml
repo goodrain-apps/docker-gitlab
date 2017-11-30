@@ -91,7 +91,7 @@ production: &base
     # This happens when the commit is pushed or merged into the default branch of a project.
     # When not specified the default issue_closing_pattern as specified below will be used.
     # Tip: you can test your closing pattern at http://rubular.com.
-    # issue_closing_pattern: '((?:[Cc]los(?:e[sd]?|ing)|[Ff]ix(?:e[sd]|ing)?|[Rr]esolv(?:e[sd]?|ing))(:?) +(?:(?:issues? +)?%{issue_ref}(?:(?:, *| +and +)?)|([A-Z][A-Z0-9_]+-\d+))+)'
+    # issue_closing_pattern: '((?:[Cc]los(?:e[sd]?|ing)|[Ff]ix(?:e[sd]|ing)?|[Rr]esolv(?:e[sd]?|ing)|[Ii]mplement(?:s|ed|ing)?)(:?) +(?:(?:issues? +)?%{issue_ref}(?:(?:, *| +and +)?)|([A-Z][A-Z0-9_]+-\d+))+)'
 
     ## Default project features settings
     default_projects_features:
@@ -166,6 +166,7 @@ production: &base
     host: {{GITLAB_PAGES_DOMAIN}}
     port: {{GITLAB_PAGES_PORT}} # Set to 443 if you serve the pages with HTTPS
     https: {{GITLAB_PAGES_HTTPS}} # Set to true if you serve the pages with HTTPS
+    artifacts_server: {{GITLAB_PAGES_ARTIFACTS_SERVER}}
     external_http: {{GITLAB_PAGES_EXTERNAL_HTTP}} # If defined, enables custom domain support in GitLab Pages
     external_https: {{GITLAB_PAGES_EXTERNAL_HTTPS}} # If defined, enables custom domain and certificate support in GitLab Pages
 
@@ -180,7 +181,7 @@ production: &base
   ## For Libravatar see: http://doc.gitlab.com/ce/customization/libravatar.html
   gravatar:
     enabled: {{GITLAB_GRAVATAR_ENABLED}}                 # Use user avatar image from Gravatar.com (default: true)
-    # gravatar urls: possible placeholders: %{hash} %{size} %{email}
+    # gravatar urls: possible placeholders: %{hash} %{size} %{email} %{username}
     plain_url: "{{GITLAB_GRAVATAR_HTTP_URL}}"     # default: http://www.gravatar.com/avatar/%{hash}?s=%{size}&d=identicon
     ssl_url:   "{{GITLAB_GRAVATAR_HTTPS_URL}}"    # default: https://secure.gravatar.com/avatar/%{hash}?s=%{size}&d=identicon
 
@@ -193,7 +194,7 @@ production: &base
       cron: "0 * * * *"
     # Execute scheduled triggers
     pipeline_schedule_worker:
-      cron: "0 */12 * * *"
+      cron: "{{GITLAB_PIPELINE_SCHEDULE_WORKER_CRON}}"
     # Remove expired build artifacts
     expire_build_artifacts_worker:
       cron: "50 * * * *"
@@ -204,7 +205,6 @@ production: &base
     # Send admin emails once a week
     admin_email_worker:
       cron: "0 0 * * 0"
-
     # Remove outdated repository archives
     repository_archive_cache_worker:
       cron: "0 * * * *"
@@ -265,7 +265,12 @@ production: &base
         host: '{{LDAP_HOST}}'
         port: {{LDAP_PORT}}
         uid: '{{LDAP_UID}}'
-        method: '{{LDAP_METHOD}}' # "tls" or "ssl" or "plain"
+
+        encryption: '{{LDAP_METHOD}}' # "start_tls" or "simple_tls" or "plain"
+        verify_certificates: {{LDAP_VERIFY_SSL}}
+        ca_file: '{{LDAP_CA_FILE}}'
+        ssl_version: '{{LDAP_SSL_VERSION}}'
+
         bind_dn: '{{LDAP_BIND_DN}}'
         password: '{{LDAP_PASS}}'
 
@@ -347,6 +352,10 @@ production: &base
     # Uncomment this to automatically sign in with a specific omniauth provider's without
     # showing GitLab's sign-in page (default: show the GitLab sign-in page)
     auto_sign_in_with_provider: {{OAUTH_AUTO_SIGN_IN_WITH_PROVIDER}}
+
+    # Sync user's email address from the specified Omniauth provider every time the user logs
+    # in (default: nil). And consequently make this field read-only.
+    # sync_email_from_provider: cas3
 
     # CAUTION!
     # This allows users to login without having a user account first. Define the allowed providers
@@ -463,18 +472,12 @@ production: &base
 
   # Gitaly settings
   gitaly:
-    # The socket_path setting is optional and obsolete. When this is set
-    # GitLab assumes it can reach a Gitaly services via a Unix socket at
-    # this path. When this is commented out GitLab will not use Gitaly.
-    #
-    # This setting is obsolete because we expect it to be moved under
-    # repositories/storages in GitLab 9.1.
-    #
-    # socket_path: tmp/sockets/gitaly.socket
-    # This setting controls whether GitLab uses Gitaly (new component
-    # introduced in 9.0). Eventually Gitaly use will become mandatory and
-    # this option will disappear.
-    enabled: false
+    # Path to the directory containing Gitaly client executables.
+    client_path: {{GITALY_CLIENT_PATH}}
+    # Default Gitaly authentication token. Can be overriden per storage. Can
+    # be left blank when Gitaly is running locally on a Unix socket, which
+    # is the normal way to deploy Gitaly.
+    token: {{GITALY_TOKEN}}
 
   #
   # 4. Advanced settings
@@ -490,6 +493,10 @@ production: &base
       default:
         path: {{GITLAB_REPOS_DIR}}/
         gitaly_address: unix:/home/git/gitlab/tmp/sockets/private/gitaly.socket # TCP connections are supported too (e.g. tcp://host:port)
+        failure_count_threshold: {{GITLAB_REPOSITORIES_STORAGES_DEFAULT_FAILURE_COUNT_THRESHOLD}} # number of failures before stopping attempts
+        failure_wait_time: {{GITLAB_REPOSITORIES_STORAGES_DEFAULT_FAILURE_WAIT_TIME}} # Seconds after an access failure before allowing access again
+        failure_reset_time: {{GITLAB_REPOSITORIES_STORAGES_DEFAULT_FAILURE_RESET_TIME}} # Time in seconds to expire failures
+        storage_timeout: {{GITLAB_REPOSITORIES_STORAGES_DEFAULT_STORAGE_TIMEOUT}} # Time in seconds to wait before aborting a storage access attempt
 
   ## Backup settings
   backup:
@@ -561,6 +568,19 @@ production: &base
     #   enabled: true
     #   host: localhost
     #   port: 3808
+    ## Monitoring
+  # Built in monitoring settings
+  monitoring:
+    # Time between sampling of unicorn socket metrics, in seconds
+    unicorn_sampler_interval: {{GITLAB_MONITORING_UNICORN_SAMPLER_INTERVAL}}
+    # IP whitelist to access monitoring endpoints
+    ip_whitelist:
+      - {{GITLAB_MONITORING_IP_WHITELIST}}
+    # Sidekiq exporter is webserver built in to Sidekiq to expose Prometheus metrics
+    sidekiq_exporter:
+      enabled: {{GITLAB_MONITORING_SIDEKIQ_EXPORTER_ENABLED}}
+      address: {{GITLAB_MONITORING_SIDEKIQ_EXPORTER_ADDRESS}}
+      port: {{GITLAB_MONITORING_SIDEKIQ_EXPORTER_PORT}}
 
   #
   # 5. Extra customization
@@ -612,7 +632,9 @@ test:
     path: tmp/tests/pages
   repositories:
     storages:
-      default: tmp/tests/repositories/
+      default:
+        path: tmp/tests/repositories/
+        gitaly_adress: unix:tmp/tests/gitaly/gitaly.socket
   backup:
     path: tmp/tests/backups
   gitlab_shell:
@@ -636,7 +658,7 @@ test:
         host: 127.0.0.1
         port: 3890
         uid: 'uid'
-        method: 'plain' # "tls" or "ssl" or "plain"
+        encryption: 'plain' # "start_tls" or "simple_tls" or "plain"
         base: 'dc=example,dc=com'
         user_filter: ''
         group_base: 'ou=groups,dc=example,dc=com'
