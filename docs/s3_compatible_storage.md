@@ -34,13 +34,13 @@ gitlab:
 
 where:
 
-| Parameter | Description |
-| --------- | ----------- |
-| `AWS_BACKUPS` | Enables automatic uploads to an Amazon S3 instance. Defaults to `false`. |
-| `AWS_BACKUP_ENDPOINT` | AWS endpoint. No defaults. |
-| `AWS_BACKUP_ACCESS_KEY_ID` | AWS access key id. No defaults. |
-| `AWS_BACKUP_SECRET_ACCESS_KEY` | AWS secret access key. No defaults. |
-| `AWS_BACKUP_BUCKET` | AWS bucket for backup uploads. No defaults. |
+| Parameter                         | Description                              |
+| --------------------------------- | ---------------------------------------- |
+| `AWS_BACKUPS`                     | Enables automatic uploads to an Amazon S3 instance. Defaults to `false`. |
+| `AWS_BACKUP_ENDPOINT`             | AWS endpoint. No defaults.               |
+| `AWS_BACKUP_ACCESS_KEY_ID`        | AWS access key id. No defaults.          |
+| `AWS_BACKUP_SECRET_ACCESS_KEY`    | AWS secret access key. No defaults.      |
+| `AWS_BACKUP_BUCKET`               | AWS bucket for backup uploads. No defaults. |
 | `AWS_BACKUP_MULTIPART_CHUNK_SIZE` | Enables mulitpart uploads when file size reaches a defined size. See at [AWS S3 Docs](http://docs.aws.amazon.com/AmazonS3/latest/dev/uploadobjusingmpu.html) |
 
 For more info look at [Available Configuration Parameters](https://github.com/sameersbn/docker-gitlab#available-configuration-parameters).
@@ -115,7 +115,7 @@ services:
     - GITLAB_TIMEZONE=Kolkata
     - GITLAB_HTTPS=false
     - SSL_SELF_SIGNED=false
-    - GITLAB_HOST=localhost
+    - GITLAB_HOST=$DEFAULT_DOMAIN
     - GITLAB_PORT=10080
     - GITLAB_SSH_PORT=10022
     - GITLAB_RELATIVE_URL_ROOT=
